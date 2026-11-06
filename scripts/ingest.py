@@ -39,7 +39,63 @@ def first_heading(md):
     return m.group(1).strip() if m else None
 
 
+# --- Soạn lại nội dung bằng Claude -------------------------------------------
+# Task nhẹ (nội dung ngắn) -> Haiku rẻ; task lớn (nội dung dài) -> Sonnet.
+# Đổi bằng biến môi trường, không cần sửa code.
+MODEL_LIGHT = os.environ.get("LLM_MODEL_LIGHT", "claude-haiku-5-5")
+MODEL_HEAVY = os.environ.get("LLM_MODEL_HEAVY", "claude-sonnet-5-5")
+HEAVY_OVER_CHARS = int(os.environ.get("LLM_HEAVY_OVER_CHARS", "40000"))
+MAX_CHARS = 1_500_000  # ~ giới hạn an toàn cho cửa sổ ngữ cảnh 1M token (không cắt bớt, quá thì bỏ qua)
+
+SYSTEM = (
+    "Bạn là biên tập viên cho một blog tài liệu tiếng Việt. Hãy tóm tắt và viết lại "
+    "nội dung được cung cấp thành bài Markdown. Quy tắc: chỉ dùng thông tin có trong "
+    "nguồn, không suy diễn hay thêm chi tiết; giữ nguyên tên riêng, số liệu, tên hàm "
+    "và code; bỏ phần menu, quảng cáo, điều hướng. Dòng đầu tiên là tiêu đề dạng "
+    "'# Tiêu đề'. Sau đó: một đoạn mở đầu 2-3 câu, các ý chính dạng gạch đầu dòng, "
+    "rồi mục '## Điểm cần nhớ'. Chỉ trả về nội dung bài, không giải thích thêm."
+)
+
+
+def pick_model(text):
+    return MODEL_HEAVY if len(text) > HEAVY_OVER_CHARS else MODEL_LIGHT
+
+
+def rewrite(body):
+    """Trả về bài đã soạn lại (Markdown) hoặc None nếu bỏ qua / lỗi -> dùng nguyên bản gốc."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    if len(body) > MAX_CHARS:
+        print("! nội dung quá dài, bỏ qua bước soạn lại", file=sys.stderr)
+        return None
+    try:
+        import anthropic
+
+        model = pick_model(body)
+        resp = anthropic.Anthropic().messages.create(
+            model=model,
+            max_tokens=16000,
+            system=SYSTEM,
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": body}],
+        )
+        if resp.stop_reason != "end_turn":
+            print(f"! {model} dừng sớm ({resp.stop_reason}), dùng bản gốc", file=sys.stderr)
+            return None
+        text = "".join(b.text for b in resp.content if b.type == "text").strip()
+        print(f"  ({model}: {resp.usage.input_tokens} in / {resp.usage.output_tokens} out)")
+        return text or None
+    except Exception as e:
+        print(f"! lỗi khi soạn lại, dùng bản gốc: {e}", file=sys.stderr)
+        return None
+
+
 def write_post(title, body, kind, source=None):
+    new = rewrite(body)
+    if new:
+        title = first_heading(new) or title
+        body = new
+    body = re.sub(r"^\s*#\s+.+\n*", "", body, count=1)  # tránh lặp tiêu đề cấp 1
     today = datetime.date.today().isoformat()
     path = POSTS / f"{today}-{slugify(title)}.md"
     n = 2
@@ -69,11 +125,62 @@ def ingest_url(url):
     write_post(title or first_heading(body) or url, body, "link", url)
 
 
+IMG_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".avif", ".bmp")
+SKIP_PREFIX = ("http://", "https://", "#", "mailto:", "data:", "//", "tel:")
+REL_RE = re.compile(r'''((?:src|href)=")([^"]*)(")|(\]\()([^)\s]+)''')
+ALERTS = {"NOTE": "note", "TIP": "tip", "IMPORTANT": "info", "WARNING": "warning", "CAUTION": "danger"}
+
+
+def absolutize(md, owner, repo):
+    """README GitHub dùng đường dẫn tương đối (ảnh, link nội bộ) nên sẽ hỏng khi chép sang site.
+    Đổi chúng thành URL tuyệt đối: ảnh -> raw.githubusercontent.com, còn lại -> trang blob/tree trên GitHub."""
+
+    def fix(path):
+        if not path or path.startswith(SKIP_PREFIX):
+            return path
+        m = re.match(r"([^#?]*)([#?].*)?$", path)
+        base, tail = m.group(1), m.group(2) or ""
+        rel = base.lstrip("/")
+        while rel.startswith("./"):
+            rel = rel[2:]
+        if rel.lower().endswith(IMG_EXT):
+            return f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{rel}{tail}"
+        kind = "tree" if rel.endswith("/") or not rel else "blob"
+        return f"https://github.com/{owner}/{repo}/{kind}/HEAD/{rel}{tail}"
+
+    def sub(m):
+        if m.group(1):
+            return m.group(1) + fix(m.group(2)) + m.group(3)
+        return m.group(4) + fix(m.group(5))
+
+    return REL_RE.sub(sub, md)
+
+
+def convert_alerts(md):
+    """> [!TIP] ... (cú pháp riêng của GitHub) -> admonition của Material."""
+    out, lines, i = [], md.split("\n"), 0
+    while i < len(lines):
+        m = re.match(r"^>\s*\[!(\w+)\]\s*(.*)$", lines[i])
+        if m and m.group(1).upper() in ALERTS:
+            body = [m.group(2)] if m.group(2) else []
+            i += 1
+            while i < len(lines) and lines[i].startswith(">"):
+                body.append(lines[i][1:].lstrip())
+                i += 1
+            out.append(f"!!! {ALERTS[m.group(1).upper()]}")
+            out += ["    " + b if b else "" for b in body]
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
 def ingest_github(owner, repo, url):
     readme = http_get(
         f"https://api.github.com/repos/{owner}/{repo}/readme",
         {"Accept": "application/vnd.github.raw+json"},
     )
+    readme = convert_alerts(absolutize(readme, owner, repo))
     write_post(f"{owner}/{repo}", readme, "repo", url)
 
 

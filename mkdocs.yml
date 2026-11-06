@@ -1,22 +1,59 @@
 site_name: Kho tài liệu
+site_description: Kho lưu trữ tri thức cá nhân tự động hóa về AI, Lập trình và Công cụ
 site_url: https://tenmiencuaban.com
 theme:
   name: material
+  language: vi
+  font:
+    text: Be Vietnam Pro
+    code: JetBrains Mono
+  icon:
+    logo: material/bookshelf
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: purple
+      toggle:
+        icon: material/weather-night
+        name: Chuyển sang chế độ tối
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: purple
+      toggle:
+        icon: material/weather-sunny
+        name: Chuyển sang chế độ sáng
   features:
+    - navigation.instant
+    - navigation.instant.progress
     - navigation.tabs
     - navigation.top
+    - toc.follow
     - search.suggest
+    - search.highlight
+    - search.share
     - content.code.copy
+extra_css:
+  - stylesheets/extra.css
+extra_javascript:
+  - javascripts/extra.js
 plugins:
   - search
-  - blog
+  - blog:
+      blog_toc: true
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
   - tables
   - toc:
       permalink: true
-  - pymdownx.highlight
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
   - pymdownx.superfences
 nav:
   - Trang chủ: index.md
-  - Blog: blog/index.md
+  - Bài viết: blog/index.md

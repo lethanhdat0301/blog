@@ -19,10 +19,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install "markitdown[pdf,docx,pptx]"
+      - run: pip install anthropic "markitdown[pdf,docx,pptx]"
       - name: Chạy ingest
         env:
           ISSUE_BODY: ${{ github.event.issue.body }}   # qua env, không nhúng trực tiếp vào script
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # không đặt thì bỏ qua bước soạn lại
         run: python scripts/ingest.py
       - name: Commit
         run: |
