@@ -1,0 +1,22 @@
+site_name: Kho tài liệu
+site_url: https://tenmiencuaban.com
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+plugins:
+  - search
+  - blog
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+nav:
+  - Trang chủ: index.md
+  - Blog: blog/index.md

@@ -1,0 +1,37 @@
+name: ingest
+on:
+  issues:
+    types: [opened]
+  push:
+    paths: ["inbox/**"]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  ingest:
+    # Chỉ chủ repo mới được kích hoạt qua issue (tránh người lạ spam repo public)
+    if: github.event_name == 'push' || github.event.issue.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "markitdown[pdf,docx,pptx]"
+      - name: Chạy ingest
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}   # qua env, không nhúng trực tiếp vào script
+        run: python scripts/ingest.py
+      - name: Commit
+        run: |
+          git config user.name "ingest-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || (git commit -m "ingest: bài mới" && git push)
+      - name: Đóng issue
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close ${{ github.event.issue.number }} --comment "Đã thêm vào blog." --repo ${{ github.repository }}
